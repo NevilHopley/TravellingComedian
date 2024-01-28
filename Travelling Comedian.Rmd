@@ -1,0 +1,314 @@
+```{r load packages}
+library(readxl) # for read_xlsx
+library(maps) # providing map data
+library(geosphere) # for distances between lat and long
+library(dplyr) # for arrange
+library(ggplot2)
+library(gganimate)
+library(gifski) # needed for gif generation
+library(purrr) # for map
+```
+
+source ukpostcodes.csv from https://geoportal.statistics.gov.uk/datasets/489c152010a3425f80a71dc3663f73e1/about
+and use the file called 'ONSPD_NOV_2022_UK.csv'
+select columns 'pcd', 'lat' and 'long' and rename them to be 'postcode', 'latitude' and 'longitude'
+store in a folder called 'data'
+
+```{r import all data}
+
+options(stringsAsFactors=FALSE)
+
+postcodes_extra = data.frame(postcode = c("SA13BX", "D02V668", "JE23QR"),
+                             latitude = c(51.6161, 53.3426, 49.1867),
+                             longitude = c(-3.9423, -6.2777, -2.1128))
+
+# import and process postcodes
+df_postcodes = read.csv("data/ukpostcodes.csv", 
+                        header = TRUE, 
+                        sep = ",",
+                        na.strings = c("NA","")) |> 
+  mutate(postcode = gsub(pattern = " ",
+                         replacement = "",
+                         x = postcode)) |> 
+  select(-id) |> # this line may be deleted depending upon your ukpostcodes.csv file columns
+  rbind(postcodes_extra)
+
+# import and process tour venue postcodes
+# and merge with latitude and longitude
+df_tours = read_xlsx("data/tours.xlsx") |> 
+  mutate(postcode = gsub(pattern = " ",
+                         replacement = "",
+                         x = postcode)) |> 
+  left_join(y = df_postcodes,
+            by = "postcode")
+
+# prepare map data
+mainland_map = ggplot2::map_data(map = "world",
+                                 regions = c("UK",
+                                             "Ireland",
+                                             "Guernsey",
+                                             "Isle of Man" ))
+```
+
+
+```{r tour routes}
+ggplot() + 
+  geom_path(data = mainland_map,
+            mapping = aes(x = long,
+                          y = lat,
+                          group = group),
+            colour = "grey",
+            na.rm = TRUE) +
+  coord_map() +
+  geom_point(data = df_tours,
+             mapping = aes(x = longitude,
+                           y = latitude,
+                           group = tour),
+             colour = "red",
+             size = 1,
+             alpha = 1,
+             na.rm = TRUE) +
+  geom_path(data = df_tours,
+            mapping = aes(x = longitude,
+                          y = latitude,
+                          group = tour),
+            colour = "blue",
+            size = 0.8,
+            alpha = 0.3,
+            na.rm = TRUE) +
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank())	+
+  facet_wrap(facets = vars(tour),
+             nrow = 2) +
+  labs(title = "UK Mainland Tour Routes")
+```
+
+Find lots of help from the following websites:
+https://goodekat.github.io/presentations/2019-isugg-gganimate-spooky/slides.html#1
+https://www.datanovia.com/en/blog/gganimate-how-to-create-plots-with-beautiful-animation-in-r/
+
+```{r animated tour routes}
+
+tour_routes = ggplot() + 
+  geom_path(data = mainland_map,
+            mapping = aes(x = long,
+                          y = lat,
+                          group = group),
+            colour = "grey",
+            na.rm = TRUE) +
+  coord_map() +
+  geom_point(data = df_tours,
+             mapping = aes(x = longitude,
+                           y = latitude,
+                           group = tour),
+             colour = "red",
+             size = 1,
+             alpha = 1,
+             na.rm = TRUE) +
+  geom_path(data = df_tours,
+            mapping = aes(x = longitude,
+                          y = latitude,
+                          group = tour),
+            colour = "blue",
+            size = 0.8,
+            alpha = 0.3,
+            na.rm = TRUE) +
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank())	+
+  facet_wrap(facets = vars(tour),
+             ncol = 4) +
+  labs(title = "Dave Gorman's Tour Routes. Day {frame_along}") +
+  transition_reveal(along = tour_order)
+
+animate(plot = tour_routes,
+        nframes = 200,
+        fps = 10,
+        renderer = gifski_renderer(loop = TRUE))
+
+anim_save(filename = "Travelling Comedian.gif",
+          animation = last_animation(),
+          path = "output")
+```
+
+to convert from gif to mp4, use https://www.freeconvert.com/convert/gif-to-mp4/
+
+```{r calculate distances between venues}
+df_tours = df_tours |> 
+  group_by(tour) |> 
+  arrange(date) |> 
+  mutate(tour_order = row_number(),
+         distance_to_next = (1/1000) * geosphere::distHaversine(cbind(longitude,
+                                                                      latitude),
+                                                                cbind(lead(longitude),
+                                                                      lead(latitude)))) |> 
+  ungroup()
+
+# summarise the mean daily distances for each tour route
+mean_tours = df_tours |> 
+  group_by(tour) |> 
+  summarise(mean_daily_distance = mean(distance_to_next,
+                                       na.rm = TRUE) %/% 1)
+```
+
+```{r simulate random tours with FOR loop}
+
+set.seed(1)
+trials = 100000
+simulations_list = list()
+routes_list = list()
+
+for (i in 1:trials) {
+  
+  df_tours = df_tours |> 
+    group_by(tour) |> 
+    mutate(tour_order_random = sample(n())) |>
+    arrange(tour_order_random) |> 
+    mutate(distance_to_next = (1/1000) * geosphere::distHaversine(cbind(longitude, latitude),
+                                                                  cbind(lead(longitude),
+                                                                        lead(latitude)))) |>
+    ungroup()
+  
+  simulations_list[[i]] <- df_tours |> 
+    group_by(tour) |> 
+    summarise(mean_daily_distance = mean(distance_to_next,
+                                         na.rm = TRUE) %/% 1) |> 
+    mutate(simulation = i)
+  
+  routes_list[[i]] <- df_tours
+}
+
+tour_simulations = dplyr::bind_rows(simulations_list)
+```
+
+```{r simulate random tours with MAP}
+
+set.seed(1)
+trials = c(1:100000)
+
+simulate_tour <- function(){
+  df_tours = df_tours |> 
+    group_by(tour) |> 
+    mutate(tour_order_random = sample(n())) |>
+    arrange(tour_order_random) |> 
+    mutate(distance_to_next = (1/1000) * geosphere::distHaversine(cbind(longitude, latitude),
+                                                                  cbind(lead(longitude),
+                                                                        lead(latitude)))) |>
+    ungroup()
+  
+  return(df_tours |> 
+           group_by(tour) |> 
+           summarise(mean_daily_distance = mean(distance_to_next,
+                                                na.rm = TRUE) %/% 1))
+}
+
+tour_simulations = purrr::map(
+  .progress = TRUE,
+  .x = trials,
+  ~ simulate_tour(),
+  .id = "trial") |> 
+  dplyr::bind_rows()
+
+```
+
+```{r graphical summary of simulations}
+
+ggplot(data = tour_simulations,
+       mapping = aes(x = mean_daily_distance)) +
+  geom_histogram(binwidth = 1)+
+  geom_vline(data = mean_tours,
+             mapping = aes(xintercept = mean_daily_distance),
+             colour = "red") +
+  facet_wrap(~ tour,
+             ncol = 4,
+             scales = "free") +
+  theme_bw() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank())
+```
+
+```{r p-values}
+
+# establish what proportion of simulated tour routes were less than the actual tour route
+p_values = left_join(x = tour_simulations,
+                     y = mean_tours,
+                     by = join_by(tour),
+                     suffix = c(".sim", ".orig")) |> 
+  mutate(less_distance = mean_daily_distance.sim < mean_daily_distance.orig) |> 
+  group_by(tour) |> 
+  summarise(p_value = mean(less_distance))
+
+```
+
+```{r optimised tour route}
+# which tour to optimise
+tour_of_interest = 8
+
+# find which simulation gave the minimum mean daily distance for the tour of interest
+optimal_tour_simulation = tour_simulations |> 
+  filter(tour == tour_of_interest &
+           mean_daily_distance == min(mean_daily_distance)) |> 
+  pull(simulation)
+
+# extract the actual route of the simulated tour that gave the minimum distance
+df_optimal_route = routes_list[[optimal_tour_simulation]] |> 
+  filter(tour == tour_of_interest)
+```
+
+```{r animated optimal tour routes}
+
+# create data frame of both tours (old and optimised) to run animation side by side
+df_tours = df_optimal_route |> 
+  mutate(tour = tour_of_interest + 0.1,
+         tour_order = tour_order_random) |> 
+  bind_rows(df_optimal_route) |> 
+  arrange(tour,
+          tour_order)
+
+# standard animated plotting routine, from before
+tour_routes = ggplot() + 
+  geom_path(data = mainland_map,
+            mapping = aes(x = long,
+                          y = lat,
+                          group = group),
+            colour = "grey",
+            na.rm = TRUE) +
+  coord_map() +
+  geom_point(data = df_tours,
+             mapping = aes(x = longitude,
+                           y = latitude,
+                           group = tour),
+             colour = "red",
+             size = 1,
+             alpha = 1,
+             na.rm = TRUE) +
+  geom_path(data = df_tours,
+            mapping = aes(x = longitude,
+                          y = latitude,
+                          group = tour),
+            colour = "blue",
+            size = 0.8,
+            alpha = 0.3,
+            na.rm = TRUE) +
+  theme(axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.background = element_blank())	+
+  facet_wrap(facets = vars(tour),
+             ncol = 4) +
+  labs(title = "Dave Gorman's Tour Routes. Day {frame_along}") +
+  transition_reveal(along = tour_order)
+
+animate(plot = tour_routes,
+        nframes = 200,
+        fps = 10,
+        renderer = gifski_renderer(loop = TRUE))
+
+anim_save(filename = "Travelling Comedian.gif",
+          animation = last_animation(),
+          path = "output")
+```
