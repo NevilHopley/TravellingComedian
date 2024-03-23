@@ -2,6 +2,8 @@
 
 This repository contains all of the materials for a [talk](http://edinbr.org/edinbr/2024/03/11/March-meeting.html) that was given to the EdinbR User Group on Fri 22 Mar 2024.
 
+A video recording of the talk is on [You Tube](https://www.youtube.com/watch?v=YsiXaCjvxYo)
+
 ## Description of Talk
 Nevil Hopley is currently a Senior Data Analyst at the Scottish Qualifications Authority.
 In this talk, he shall demonstrate the use of gganimate when examining the UK tour routes taken by the comedian Dave Gorman, between 2009 and 2023. In a twist on the classic Traveling Salesman problem, we shall discover whether Dave Gorman could have travelled less distance per day, on average, by performing in the same towns, but in a different order.
